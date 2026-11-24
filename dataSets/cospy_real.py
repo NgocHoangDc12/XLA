@@ -36,7 +36,18 @@ class MSCOCO2017(torch.utils.data.Dataset):
 class Flickr30k(torch.utils.data.Dataset):
     def __init__(self, split='test', transform=None):
         # Split [test: 31014]
-        self.dataset = ds.load_dataset("nlphuji/flickr30k")[split]
+        try:
+            self.dataset = ds.load_dataset("nlphuji/flickr30k", trust_remote_code=True)[split]
+        except TypeError:
+            self.dataset = ds.load_dataset("nlphuji/flickr30k")[split]
+        except Exception as e:
+            if "Dataset scripts are no longer supported" in str(e):
+                raise RuntimeError(
+                    "Thư viện 'datasets' phiên bản >= 3.0 đã chặn script flickr30k.py! "
+                    "Vui lòng chạy lệnh sau trên terminal/Colab rồi chạy lại:\n"
+                    "    pip install \"datasets<3.0.0\""
+                ) from e
+            raise e
 
         # Preprocess the images
         self.transform = transform
@@ -46,8 +57,8 @@ class Flickr30k(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         example = self.dataset[idx]
-        # PIL RGB image
-        image = example['image']
+        # PIL RGB image - copy to detach from HuggingFace dataset file handles
+        image = example['image'].convert('RGB').copy()
         if self.transform:
             image = self.transform(image)
         # A list of valid captions

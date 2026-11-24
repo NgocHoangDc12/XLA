@@ -6,14 +6,16 @@ from .base import BaseDetector
 
 
 class ArtifactDetector(BaseDetector):
-    def __init__(self, dim_artifact=512, num_classes=1):
+    def __init__(self, dim_artifact=512, num_classes=1, use_freq=False):
         super(ArtifactDetector, self).__init__()
+        self.use_freq = use_freq
 
         # Load the artifact encoder based on NPR
         self.artifact_encoder = ResNet(Bottleneck, [3, 4, 6, 3])
 
         # Classifier
         self.fc = torch.nn.Linear(dim_artifact, num_classes)
+
 
         # Build transforms
         self._build_transforms()

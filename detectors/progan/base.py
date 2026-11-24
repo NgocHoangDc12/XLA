@@ -71,6 +71,7 @@ class BaseDetector(torch.nn.Module, ABC):
         """Forward pass of the detector."""
         pass
 
+    @torch.no_grad()
     def predict(self, inputs):
         """Prediction function."""
         inputs = inputs.to(next(self.parameters()).device)

@@ -9,7 +9,7 @@ from .artifact import ArtifactDetector
 class CoSpyFusionDetector(BaseDetector):
     """CO-SPY Fusion Detector (calibrate and fuse semantic and artifact detectors)."""
 
-    def __init__(self, semantic_weights_path, artifact_weights_path, num_classes=1):
+    def __init__(self, semantic_weights_path, artifact_weights_path, num_classes=1, use_freq=False):
         super(CoSpyFusionDetector, self).__init__()
 
         # Load the semantic detector
@@ -17,7 +17,7 @@ class CoSpyFusionDetector(BaseDetector):
         self.sem.load_weights(semantic_weights_path)
 
         # Load the artifact detector
-        self.art = ArtifactDetector()
+        self.art = ArtifactDetector(use_freq=use_freq)
         self.art.load_weights(artifact_weights_path)
 
         # Freeze the two pre-trained models

@@ -9,15 +9,24 @@ from .artifact import ArtifactDetector
 class CoSpyFusionDetector(BaseDetector):
     """CO-SPY Fusion Detector (calibrate and fuse semantic and artifact detectors)."""
 
-    def __init__(self, semantic_weights_path, artifact_weights_path, num_classes=1):
+    def __init__(self, semantic_weights_path, artifact_weights_path, num_classes=1, use_freq=False):
         super(CoSpyFusionDetector, self).__init__()
+
+        # Auto-detect if artifact weights were trained with use_freq
+        if not use_freq and os.path.exists(artifact_weights_path):
+            try:
+                chk = torch.load(artifact_weights_path, map_location='cpu')
+                if 'fc.weight' in chk and chk['fc.weight'].shape[1] == 640:
+                    use_freq = True
+            except Exception:
+                pass
 
         # Load the semantic detector
         self.sem = SemanticDetector()
         self.sem.load_weights(semantic_weights_path)
 
         # Load the artifact detector
-        self.art = ArtifactDetector()
+        self.art = ArtifactDetector(use_freq=use_freq)
         self.art.load_weights(artifact_weights_path)
 
         # Freeze the two pre-trained models

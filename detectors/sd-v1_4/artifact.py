@@ -7,20 +7,23 @@ from .base import BaseDetector
 
 
 class ArtifactDetector(BaseDetector):
-    def __init__(self, dim_artifact=512, num_classes=1):
+    def __init__(self, dim_artifact=512, num_classes=1, use_freq=False):
         super(ArtifactDetector, self).__init__()
+        self.use_freq = use_freq
+        self.dim_artifact = dim_artifact + (128 if use_freq else 0)
 
         # Load the pre-trained VAE
         model_id = "CompVis/stable-diffusion-v1-4"
         vae = StableDiffusionPipeline.from_pretrained(model_id).vae
         vae.requires_grad_(False)
-        self.artifact_encoder = VAEReconEncoder(vae)
+        self.artifact_encoder = VAEReconEncoder(vae, use_freq=use_freq)
 
         # Classifier
-        self.fc = torch.nn.Linear(dim_artifact, num_classes)
+        self.fc = torch.nn.Linear(self.dim_artifact, num_classes)
 
         # Build transforms
         self._build_transforms()
+
     
     def _build_transforms(self):
         # Normalization
@@ -84,6 +87,16 @@ class ArtifactDetector(BaseDetector):
             return feat, out
         return out
 
+    def load_weights(self, weights_path):
+        weights = torch.load(weights_path, map_location='cpu')
+        if 'fc.weight' in weights and weights['fc.weight'].shape[1] == 640 and not self.use_freq:
+            self.use_freq = True
+            self.dim_artifact = 640
+            self.fc = torch.nn.Linear(640, self.fc.out_features)
+            self.artifact_encoder.use_freq = True
+            self.artifact_encoder.freq_branch = FrequencyBranch(in_channels=3, out_dim=128)
+        self.load_state_dict(weights, strict=False)
+
 
 # Helper functions for ResNet
 def conv3x3(in_planes, out_planes, stride=1):
@@ -134,9 +147,46 @@ class Bottleneck(nn.Module):
         return out
 
 
+class FrequencyBranch(nn.Module):
+    """Extracts frequency-domain representations from artifact maps using 2D FFT."""
+
+    def __init__(self, in_channels=3, out_dim=128):
+        super(FrequencyBranch, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1)),
+        )
+        self.fc = nn.Linear(128, out_dim)
+
+    def forward(self, x):
+        # x is artifact map: [B, C, H, W]
+        # Compute 2D FFT per channel
+        fft_val = torch.fft.fft2(x, norm="ortho")
+        fft_shift = torch.fft.fftshift(fft_val, dim=(-2, -1))
+        # Log magnitude spectrum
+        mag = torch.log(torch.abs(fft_shift) + 1e-8)
+        # Normalize across spatial dims for numerical stability
+        mean = mag.mean(dim=(-2, -1), keepdim=True)
+        std = mag.std(dim=(-2, -1), keepdim=True) + 1e-6
+        mag_norm = (mag - mean) / std
+        feat = self.conv(mag_norm)
+        feat = feat.view(feat.size(0), -1)
+        feat = self.fc(feat)
+        return feat
+
+
 class VAEReconEncoder(nn.Module):
-    def __init__(self, vae, block=Bottleneck):
+    def __init__(self, vae, block=Bottleneck, use_freq=False):
         super(VAEReconEncoder, self).__init__()
+        self.use_freq = use_freq
 
         # Define the ResNet model
         self.inplanes = 64
@@ -150,6 +200,10 @@ class VAEReconEncoder(nn.Module):
         self.layer2 = self._make_layer(block, 128, 4, stride=2)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+
+        # Frequency branch
+        if self.use_freq:
+            self.freq_branch = FrequencyBranch(in_channels=3, out_dim=128)
 
         # Kaiming initialization
         for m in self.modules():
@@ -188,10 +242,14 @@ class VAEReconEncoder(nn.Module):
         # Reconstruct
         x_recon = self.reconstruct(x)
         # Compute the artifacts
-        x = x - x_recon
+        artifact_raw = x - x_recon
+
+        freq_feat = None
+        if self.use_freq:
+            freq_feat = self.freq_branch(artifact_raw)
 
         # Scale the artifacts
-        x = x / 7. * 100.
+        x = artifact_raw / 7. * 100.
 
         # Forward pass
         x = self.conv1(x)
@@ -203,6 +261,9 @@ class VAEReconEncoder(nn.Module):
         x = self.layer2(x)
 
         x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
+        spatial_feat = x.view(x.size(0), -1)
 
-        return x
+        if self.use_freq:
+            return torch.cat([spatial_feat, freq_feat], dim=1)
+        return spatial_feat
+

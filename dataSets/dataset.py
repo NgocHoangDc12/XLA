@@ -12,15 +12,39 @@ class TrainDataset(Dataset):
     def __init__(self, train_dataset, split="train", add_jpeg=False, transform=None):
         assert split in ["train", "val"]
         # Root directory of the training datasets
-        root_dir = f"data/train/{train_dataset}"
+        root_dir = os.path.join("data", "train", train_dataset)
+
+        if not os.path.isdir(root_dir):
+            raise FileNotFoundError(
+                f"Training dataset '{train_dataset}' not found at '{root_dir}'. "
+                f"Download it first with `cd data/train/{train_dataset} && sh download.sh`."
+            )
 
         # Load the dataset for training
-        if train_dataset == "progan":
-            real_list = get_list(os.path.join(root_dir, split), must_contain='0_real')
-            fake_list = get_list(os.path.join(root_dir, split), must_contain='1_fake')
+        if train_dataset in ["progan", "writing"]:
+            real_dir = os.path.join(root_dir, split)
+            fake_dir = os.path.join(root_dir, split)
+            real_list = get_list(real_dir, must_contain='0_real')
+            fake_list = get_list(fake_dir, must_contain='1_fake')
         elif train_dataset == "sd-v1_4":
-            real_list = get_list(os.path.join(root_dir, "mscoco2017", f"{split}2017"))
-            fake_list = get_list(os.path.join(root_dir, "stable-diffusion-v1-4", f"{split}2017"))
+            real_dir = os.path.join(root_dir, "mscoco2017", f"{split}2017")
+            fake_dir = os.path.join(root_dir, "stable-diffusion-v1-4", f"{split}2017")
+            real_list = get_list(real_dir)
+            fake_list = get_list(fake_dir)
+        else:
+            raise ValueError(f"Unsupported train_dataset: '{train_dataset}'")
+
+        if not real_list or not fake_list:
+            missing = []
+            if not real_list:
+                missing.append(f"real data in {real_dir}")
+            if not fake_list:
+                missing.append(f"fake data in {fake_dir}")
+            raise FileNotFoundError(
+                f"No training samples were found for '{train_dataset}' ({split} split). "
+                f"Download the dataset and ensure the files exist at: {', '.join(missing)}. "
+                f"Run `cd data/train/{train_dataset} && sh download.sh`."
+            )
 
         # Setting the labels for the dataset
         self.labels_dict = {}
@@ -30,8 +54,7 @@ class TrainDataset(Dataset):
             self.labels_dict[i] = 1
 
         # Construct the entire dataset
-        self.total_list = real_list + fake_list
-        np.random.shuffle(self.total_list)
+        self.total_list = sorted(real_list + fake_list)
 
         # JPEG compression
         self.add_jpeg = add_jpeg
@@ -58,15 +81,18 @@ class TrainDataset(Dataset):
 
 
 class CoSpyBenchTestDataset(Dataset):
-    def __init__(self, dataset, model, num_real=2000, add_jpeg=True, transform=None):
+    def __init__(self, dataset, model, num_real=2000, add_jpeg=True, transform=None, root_path="data/test/Co-Spy-Bench/synthetic"):
         # Root path of the Co-Spy-Bench dataset
-        root_path = "data/test/Co-Spy-Bench/synthetic"
+        self.root_path = root_path
 
         # Load fake images
-        fake_dir = os.path.join(root_path, dataset, model)
-        fake_list = [i for i in os.listdir(fake_dir) if i.endswith(".png")]
-        fake_list.sort()
-        self.fake = [os.path.join(fake_dir, i) for i in fake_list]
+        fake_dir = os.path.join(self.root_path, dataset, model)
+        if not os.path.isdir(fake_dir):
+            self.fake = []
+        else:
+            fake_list = [i for i in os.listdir(fake_dir) if i.endswith((".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG"))]
+            fake_list.sort()
+            self.fake = [os.path.join(fake_dir, i) for i in fake_list]
 
         # Take the real images from the dataset
         if dataset == "mscoco":
@@ -95,7 +121,7 @@ class CoSpyBenchTestDataset(Dataset):
         if idx < self.num_real:
             image, _ = self.real[idx]
         else:
-            image = Image.open(self.fake[idx - self.num_real]).convert("RGB")
+            image = Image.open(self.fake[idx - self.num_real]).convert("RGB").copy()
 
         # JPEG compression
         if self.add_jpeg:
@@ -110,12 +136,12 @@ class CoSpyBenchTestDataset(Dataset):
 
 
 class AIGCDetectTestDataset(Dataset):
-    def __init__(self, dataset, model, transform=None):
+    def __init__(self, dataset, model, transform=None, root_path="data/test/AIGCDetectionBenchMark"):
         # Root path of the AIGCDetectionBenchMark dataset
-        root_path = "data/test/AIGCDetectionBenchMark"
+        self.root_path = root_path
 
         # Load images
-        image_dir = os.path.join(root_path, dataset, model)
+        image_dir = os.path.join(self.root_path, dataset, model)
         real_list = get_list(image_dir, must_contain='0_real')
         fake_list = get_list(image_dir, must_contain='1_fake')
 

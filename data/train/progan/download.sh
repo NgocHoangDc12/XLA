@@ -27,30 +27,58 @@ for tool in wget 7z unzip; do
 done
 [ "$_missing" = 1 ] && exit 1
 
-# Create directory and download training dataset
-# mkdir train
-cd train
+set -e
 
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.001 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.002 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.003 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.004 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.005 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.006 &
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_train.7z.007 &
-wait $(jobs -p)
+ROOT="${ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+BASE="https://huggingface.co/datasets/sywang/CNNDetection/resolve/main"
 
-7z x progan_train.7z.001
-unzip progan_train.zip
-rm progan_train.zip
-rm progan_train.7z.*
-cd ..
+mkdir -p "$ROOT/train" "$ROOT/val"
+cd "$ROOT"
 
-# Create directory and download validation dataset
-mkdir val
-cd val
-wget https://huggingface.co/datasets/sywang/CNNDetection/resolve/main/progan_val.zip
+has_files() {
+    [ -n "$(find "$1" -mindepth 1 -maxdepth 1 -print -quit)" ]
+}
 
-unzip progan_val.zip
-rm progan_val.zip
-cd ..
+ensure_downloaded() {
+    file="$1"
+
+    if [ -s "$file" ]; then
+        echo "Checking existing file and resuming only if incomplete: $file"
+    else
+        echo "Downloading: $file"
+    fi
+    wget -c "$BASE/$file"
+}
+
+# Keep existing extracted data; if an archive is present, allow extraction to resume.
+train_archives_present=0
+for archive in "$ROOT"/progan_train.7z.00?; do
+    if [ -e "$archive" ]; then
+        train_archives_present=1
+        break
+    fi
+done
+
+if has_files "$ROOT/train" && [ ! -e "$ROOT/progan_train.zip" ] \
+    && [ "$train_archives_present" = 0 ]; then
+    echo "Training data already exists; skipping."
+else
+    for part in 001 002 003 004 005 006 007; do
+        ensure_downloaded "progan_train.7z.$part"
+    done
+
+    if [ ! -s "$ROOT/progan_train.zip" ]; then
+        7z x "$ROOT/progan_train.7z.001" "-o$ROOT"
+    fi
+
+    unzip -o "$ROOT/progan_train.zip" -d "$ROOT/train"
+    rm -f "$ROOT"/progan_train.7z.00? "$ROOT/progan_train.zip"
+fi
+
+if has_files "$ROOT/val" && [ ! -e "$ROOT/progan_val.zip" ]; then
+    echo "Validation data already exists; skipping."
+else
+    ensure_downloaded "progan_val.zip"
+    unzip -o "$ROOT/progan_val.zip" -d "$ROOT/val"
+    rm -f "$ROOT/progan_val.zip"
+fi

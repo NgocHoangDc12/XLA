@@ -133,6 +133,10 @@ def png_to_jpeg(img, quality=95):
     # Convert the PNG image to JPEG
     # Input: PIL image
     # Output: PIL image
+    if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+    # Detach from ImageFile/file handles to avoid Pillow 11 / Python 3.13 abspath CWD bug in DataLoader workers
+    img = img.copy()
     out = BytesIO()
     img.save(out, format='jpeg', quality=quality)
     img = np.array(Image.open(out))
@@ -174,6 +178,34 @@ class LabelSmoothingBCEWithLogits(torch.nn.Module):
         target = target.float() * (1.0 - self.smoothing) + 0.5 * self.smoothing
         loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, target, reduction='mean')
         return loss
+
+
+class FocalBCEWithLogitsLoss(torch.nn.Module):
+    """
+    Focal Loss with Logits for Binary Classification.
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    where p_t is the model's estimated probability for the ground truth class.
+    """
+    def __init__(self, gamma=2.0, alpha=0.25, reduction='mean'):
+        super(FocalBCEWithLogitsLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.reduction = reduction
+
+    def forward(self, logits, targets):
+        targets = targets.float()
+        p = torch.sigmoid(logits)
+        bce_loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        p_t = p * targets + (1 - p) * (1 - targets)
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        loss = alpha_t * ((1 - p_t) ** self.gamma) * bce_loss
+
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        return loss
+
 
 
 def evaluate(y_pred, y_true):

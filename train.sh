@@ -6,6 +6,10 @@ while [[ $# -gt 0 ]]; do
             dataset="$2"
             shift 2
             ;;
+        --ckpt)
+            ckpt="$2"
+            shift 2
+            ;;
         --gpu)
             gpu="$2"
             shift 2
@@ -17,6 +21,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+ckpt="${ckpt:-ckpt}"
+
 # Artifact branch training
 python main.py \
     --phase train \
@@ -24,7 +30,8 @@ python main.py \
     --mode branch \
     --branch artifact \
     --train_dataset $dataset \
-    --epochs 20
+    --epochs 20 \
+    --ckpt "$ckpt"
 
 # Semantic branch training (feature interpolation is only applied for sd-v1_4)
 semantic_extra=""
@@ -39,6 +46,7 @@ python main.py \
     --branch semantic \
     --train_dataset $dataset \
     --epochs 10 \
+    --ckpt "$ckpt" \
     $semantic_extra
 
 # Fusion
@@ -47,4 +55,5 @@ python main.py \
     --gpu $gpu \
     --mode fusion \
     --train_dataset $dataset \
-    --epochs 1
+    --epochs 1 \
+    --ckpt "$ckpt"

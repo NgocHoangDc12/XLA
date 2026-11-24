@@ -31,6 +31,8 @@ class SemanticDetector(BaseDetector):
 
     def forward(self, x, return_feat=False):
         feat = self.clip.get_image_features(x)
+        if not isinstance(feat, torch.Tensor):
+            feat = getattr(feat, "pooler_output", feat[0])
         out = self.fc(feat)
         if return_feat:
             return feat, out
